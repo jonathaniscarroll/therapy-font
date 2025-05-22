@@ -36,9 +36,21 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // Load first set of posts
+// Add a simple cache mechanism
+const postCache = new Map();
+
 async function loadInitialPosts() {
   try {
     showLoading(true);
+    
+    // Check cache first
+    if (postCache.has('initialPosts')) {
+      const cachedPosts = postCache.get('initialPosts');
+      cachedPosts.forEach(post => createFullScreenPost(post));
+      showLoading(false);
+      return;
+    }
+    
     const q = query(
       collection(db, "posts"), 
       orderBy("createdAt", "desc"), 
@@ -46,17 +58,20 @@ async function loadInitialPosts() {
     );
     const querySnapshot = await getDocs(q);
     
-    console.log("Initial posts loaded:", querySnapshot.size); // Debug log
-    
     if (querySnapshot.empty) {
       showNoPostsMessage();
       return;
     }
 
-    lastVisible = querySnapshot.docs[querySnapshot.docs.length-1];
+    const posts = [];
     querySnapshot.forEach(doc => {
+      posts.push(doc.data());
       createFullScreenPost(doc.data());
     });
+    
+    // Cache the results
+    postCache.set('initialPosts', posts);
+    lastVisible = querySnapshot.docs[querySnapshot.docs.length-1];
   } catch (error) {
     console.error("Error loading posts:", error);
     showErrorMessage();
@@ -66,40 +81,57 @@ async function loadInitialPosts() {
 }
 
 // Load more posts when scrolling
+// Add retry logic to loadMorePosts
 async function loadMorePosts() {
-  if (loading || allPostsLoaded) return;
-  
-  loading = true;
-  showLoading(true);
-  
-  try {
-    const nextQ = query(
-      collection(db, "posts"),
-      orderBy("createdAt", "desc"),
-      startAfter(lastVisible),
-      limit(2)
-    );
+    if (loading || allPostsLoaded) return;
     
-    const nextSnapshot = await getDocs(nextQ);
-    console.log("More posts loaded:", nextSnapshot.size); // Debug log
+    loading = true;
+    showLoading(true);
     
-    if (nextSnapshot.empty) {
-      console.log("No more posts to load");
-      allPostsLoaded = true;
-      return;
+    try {
+      const nextQ = query(
+        collection(db, "posts"),
+        orderBy("createdAt", "desc"),
+        startAfter(lastVisible),
+        limit(2)
+      );
+      
+      const nextSnapshot = await getDocs(nextQ);
+      
+      if (nextSnapshot.empty) {
+        allPostsLoaded = true;
+        return;
+      }
+      
+      lastVisible = nextSnapshot.docs[nextSnapshot.docs.length-1];
+      
+      // Cache these posts
+      const newPosts = [];
+      nextSnapshot.forEach(doc => {
+        newPosts.push(doc.data());
+        createFullScreenPost(doc.data());
+      });
+      
+      postCache.set(`posts-after-${lastVisible.id}`, newPosts);
+    } catch (error) {
+      console.error("Error loading more posts:", error);
+      
+      // Show retry button
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'retry-button';
+      retryBtn.textContent = 'Retry Loading';
+      retryBtn.addEventListener('click', () => {
+        retryBtn.remove();
+        loadMorePosts();
+      });
+      
+      const sentinel = document.getElementById('load-more-sentinel');
+      if (sentinel) sentinel.before(retryBtn);
+    } finally {
+      loading = false;
+      showLoading(false);
     }
-    
-    lastVisible = nextSnapshot.docs[nextSnapshot.docs.length-1];
-    nextSnapshot.forEach(doc => {
-      createFullScreenPost(doc.data());
-    });
-  } catch (error) {
-    console.error("Error loading more posts:", error);
-  } finally {
-    loading = false;
-    showLoading(false);
   }
-}
 
 // Create full-screen post element
 function createFullScreenPost(post) {
@@ -112,33 +144,70 @@ function createFullScreenPost(post) {
   
   if (post.media && post.media.length > 0) {
     const media = post.media[0];
-    if (media.type === 'video') {
-      const videoWrapper = document.createElement('div');
-      videoWrapper.className = 'video-wrapper';
+    // In createFullScreenPost function, modify video handling:
+if (media.type === 'video') {
+    const videoWrapper = document.createElement('div');
+    videoWrapper.className = 'video-wrapper';
+    
+    const video = document.createElement('video');
+    video.src = media.url;
+    video.controls = true;
+    video.playsInline = true;
+    video.loop = true;
+    video.muted = true;
+    video.preload = 'metadata'; // Optimize preloading
+    video.loading = 'lazy'; // Lazy load videos
+    
+    // Add loading state
+    video.addEventListener('loadstart', () => {
+      videoWrapper.classList.add('video-loading');
+    });
+    
+    video.addEventListener('loadedmetadata', () => {
+      videoWrapper.classList.remove('video-loading');
+    });
+    
+    // Add click to play/pause with better UX
+    const playOverlay = document.createElement('div');
+    playOverlay.className = 'video-overlay';
+    const playButton = document.createElement('button');
+    playButton.className = 'play-button';
+    playButton.innerHTML = '▶';
+    playOverlay.appendChild(playButton);
+    
+    playOverlay.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (video.paused) {
+        video.play().catch(e => console.log("Play failed:", e));
+        playOverlay.style.display = 'none';
+      }
+    });
+    
+    video.addEventListener('pause', () => {
+      playOverlay.style.display = 'flex';
+    });
+    
+    videoWrapper.appendChild(video);
+    videoWrapper.appendChild(playOverlay);
+    mediaContainer.appendChild(videoWrapper);
+  }
+     else {
+        const img = document.createElement('img');
+        img.src = media.url;
+        img.alt = media.caption || '';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        
+        // Use a blurred placeholder for better perceived performance
+        img.style.transition = 'filter 0.3s ease';
+        img.style.filter = 'blur(5px)';
+        
+        img.onload = () => {
+          img.style.filter = 'none';
+        };
+        
+        mediaContainer.appendChild(img);
       
-      const video = document.createElement('video');
-      video.src = media.url;
-      video.controls = true;
-      video.playsInline = true;
-      video.loop = true;
-      video.muted = true;
-      
-      // Add click to play/pause
-      video.addEventListener('click', () => {
-        if (video.paused) {
-          video.play().catch(e => console.log("Play failed:", e));
-        } else {
-          video.pause();
-        }
-      });
-      
-      videoWrapper.appendChild(video);
-      mediaContainer.appendChild(videoWrapper);
-    } else {
-      const img = document.createElement('img');
-      img.src = media.url;
-      img.alt = media.caption || '';
-      mediaContainer.appendChild(img);
     }
   }
   
@@ -167,17 +236,23 @@ function createFullScreenPost(post) {
 
 // Scroll listener for infinite loading
 function setupScrollListener() {
-  window.addEventListener('scroll', () => {
-    const scrollPosition = window.innerHeight + window.scrollY;
-    const documentHeight = document.body.offsetHeight;
-    
-    console.log(`Scroll position: ${scrollPosition}/${documentHeight}`); // Debug
-    
-    if (scrollPosition >= documentHeight - 100 && !loading && !allPostsLoaded) {
-      loadMorePosts();
-    }
-  }, { passive: true });
-}
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && !loading && !allPostsLoaded) {
+          loadMorePosts();
+        }
+      });
+    }, {
+      rootMargin: '100px',
+      threshold: 0.1
+    });
+  
+    // Create and observe a sentinel element
+    const sentinel = document.createElement('div');
+    sentinel.id = 'load-more-sentinel';
+    contentWrapper.appendChild(sentinel);
+    observer.observe(sentinel);
+  }
 
 // Helper functions
 function showLoading(show) {

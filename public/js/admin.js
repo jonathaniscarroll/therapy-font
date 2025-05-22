@@ -103,17 +103,27 @@ publishBtn.addEventListener('click', async () => {
 // File Upload with Retry
 async function uploadFile(file, index) {
   try {
+    // Compress video before upload
+    let fileToUpload = file;
+    if (file.type.startsWith('video/')) {
+      updateUploadStatus(index, 'Compressing video...', 0);
+      fileToUpload = await compressVideo(file);
+      updateUploadStatus(index, 'Uploading compressed video...', 0);
+    }
+
     // Create storage reference
-    const fileExt = file.name.split('.').pop();
-    const storageRef = ref(storage, `media/${Date.now()}_${file.name.replace(/\s+/g, '_')}`);
+    const fileExt = fileToUpload.name.split('.').pop();
+    const storageRef = ref(storage, `media/${Date.now()}_${fileToUpload.name.replace(/\s+/g, '_')}`);
     
-    // Show upload progress
+    // Rest of your upload logic remains the same...
     updateUploadStatus(index, 'Uploading...', 0);
     
-    // Upload file
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    const uploadTask = uploadBytesResumable(storageRef, fileToUpload, {
+      contentType: fileToUpload.type,
+      cacheControl: 'public, max-age=31536000', // 1 year cache
+      contentDisposition: `inline; filename=${encodeURIComponent(fileToUpload.name)}`
+    });
     
-    // Monitor progress
     uploadTask.on('state_changed',
       (snapshot) => {
         const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
@@ -131,9 +141,12 @@ async function uploadFile(file, index) {
     
     updateUploadStatus(index, 'Upload complete', 100);
     return {
-      type: file.type.startsWith('video') ? 'video' : 'image',
+      type: fileToUpload.type.startsWith('video') ? 'video' : 'image',
       url,
-      name: file.name
+      name: fileToUpload.name,
+      originalSize: file.size,
+      compressedSize: fileToUpload.size,
+      compressionRatio: file.size > 0 ? Math.round((1 - (fileToUpload.size / file.size)) * 100) : 0
     };
   } catch (error) {
     console.error(`Failed to upload ${file.name}:`, error);
@@ -205,4 +218,53 @@ function resetForm() {
   mediaUpload.value = '';
   currentFiles = [];
   mediaPreview.innerHTML = '';
+}
+
+// Add this function to your admin.js
+async function compressVideo(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('video/')) {
+      resolve(file); // Skip non-video files
+      return;
+    }
+
+    const video = document.createElement('video');
+    const source = URL.createObjectURL(file);
+    video.src = source;
+
+    video.onloadedmetadata = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Set target dimensions (adjust as needed)
+      const targetWidth = 1280;
+      const targetHeight = Math.round(video.videoHeight * (targetWidth / video.videoWidth));
+      
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      video.oncanplay = () => {
+        // Draw video frame to canvas
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+        
+        // Convert to compressed format (MP4 with H.264)
+        canvas.toBlob(async (blob) => {
+          const compressedFile = new File([blob], file.name, {
+            type: 'video/mp4',
+            lastModified: Date.now()
+          });
+          
+          URL.revokeObjectURL(source);
+          resolve(compressedFile);
+        }, 'video/mp4', 0.7); // 0.7 is quality (0-1)
+      };
+      
+      video.play();
+    };
+
+    video.onerror = () => {
+      URL.revokeObjectURL(source);
+      reject(new Error('Video processing failed'));
+    };
+  });
 }
