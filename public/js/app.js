@@ -236,23 +236,30 @@ if (media.type === 'video') {
 
 // Scroll listener for infinite loading
 function setupScrollListener() {
+    const observerOptions = {
+      root: null,
+      rootMargin: '200px', // Load more when 200px away from bottom
+      threshold: 0.1
+    };
+  
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting && !loading && !allPostsLoaded) {
           loadMorePosts();
         }
       });
-    }, {
-      rootMargin: '100px',
-      threshold: 0.1
-    });
+    }, observerOptions);
   
-    // Create and observe a sentinel element
-    const sentinel = document.createElement('div');
-    sentinel.id = 'load-more-sentinel';
-    contentWrapper.appendChild(sentinel);
+    // Create sentinel element if it doesn't exist
+    let sentinel = document.getElementById('load-more-sentinel');
+    if (!sentinel) {
+      sentinel = document.createElement('div');
+      sentinel.id = 'load-more-sentinel';
+      contentWrapper.appendChild(sentinel);
+    }
     observer.observe(sentinel);
   }
+  
 
 // Helper functions
 function showLoading(show) {
@@ -281,3 +288,11 @@ function showErrorMessage() {
   error.textContent = 'Error loading posts';
   contentWrapper.appendChild(error);
 }
+
+function setVhUnit() {
+    const vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+  }
+  
+  window.addEventListener('resize', setVhUnit);
+  setVhUnit();
