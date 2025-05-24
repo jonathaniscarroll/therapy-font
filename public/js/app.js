@@ -131,10 +131,32 @@ function createGridPost(postId, post) {
   
   if (post.media && post.media.length > 0) {
     const media = post.media[0];
-    const mediaElement = media.type === 'video' 
-      ? createVideoElement(media.url, false)
-      : createImageElement(media.url, false);
-    mediaContainer.appendChild(mediaElement);
+    if (media.type === 'video') {
+      // Create video thumbnail container
+      const thumbnailContainer = document.createElement('div');
+      thumbnailContainer.className = 'video-thumbnail-container';
+      
+      // Create thumbnail image (will be set via JS)
+      const thumbnail = document.createElement('img');
+      thumbnail.className = 'video-thumbnail';
+      thumbnail.loading = 'lazy';
+      
+      // Create play icon overlay
+      const playIcon = document.createElement('div');
+      playIcon.className = 'video-play-icon';
+      playIcon.innerHTML = '▶';
+      
+      // Load thumbnail from video
+      loadVideoThumbnail(media.url, thumbnail);
+      
+      thumbnailContainer.appendChild(thumbnail);
+      thumbnailContainer.appendChild(playIcon);
+      mediaContainer.appendChild(thumbnailContainer);
+    } else {
+      // Regular image handling
+      const img = createImageElement(media.url, false);
+      mediaContainer.appendChild(img);
+    }
   }
   
   const overlay = document.createElement('div');
@@ -163,6 +185,40 @@ function createGridPost(postId, post) {
   
   postsGrid.appendChild(gridItem);
 }
+
+function loadVideoThumbnail(videoUrl, thumbnailElement) {
+  // Create a video element to capture the thumbnail
+  const video = document.createElement('video');
+  video.src = videoUrl;
+  video.muted = true;
+  video.playsInline = true;
+  
+  // When enough data is loaded to show a frame
+  video.addEventListener('loadeddata', () => {
+    // Seek to a frame at 25% of the video
+    video.currentTime = Math.min(0.25, video.duration * 0.25);
+  });
+  
+  // When seeking is complete
+  video.addEventListener('seeked', () => {
+    // Create a canvas to capture the frame
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Set the thumbnail source
+    thumbnailElement.src = canvas.toDataURL('image/jpeg', 0.8);
+    
+    // Clean up
+    video.remove();
+  });
+  
+  // Start loading the video
+  video.load();
+}
+
 
 // Open fullscreen view
 function openFullscreenView(postId, post) {
