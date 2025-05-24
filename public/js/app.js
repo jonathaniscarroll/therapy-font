@@ -271,7 +271,6 @@ async function deletePost(postId) {
 
 // Scroll listener for infinite loading
 function setupScrollListener() {
-<<<<<<< HEAD
   const observer = new IntersectionObserver((entries) => {
     const entry = entries[0];
     if (entry.isIntersecting && !loading && !allPostsLoaded) {
@@ -287,32 +286,6 @@ function setupScrollListener() {
   postsGrid.appendChild(sentinel);
   observer.observe(sentinel);
 }
-=======
-    const observerOptions = {
-      root: null,
-      rootMargin: '200px', // Load more when 200px away from bottom
-      threshold: 0.1
-    };
-  
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting && !loading && !allPostsLoaded) {
-          loadMorePosts();
-        }
-      });
-    }, observerOptions);
-  
-    // Create sentinel element if it doesn't exist
-    let sentinel = document.getElementById('load-more-sentinel');
-    if (!sentinel) {
-      sentinel = document.createElement('div');
-      sentinel.id = 'load-more-sentinel';
-      contentWrapper.appendChild(sentinel);
-    }
-    observer.observe(sentinel);
-  }
-  
->>>>>>> refs/remotes/origin/main
 
 // Helper functions
 function showLoading(show) {
@@ -336,20 +309,8 @@ function showNoPostsMessage() {
 }
 
 function showErrorMessage() {
-<<<<<<< HEAD
-  const error = document.createElement('
-=======
   const error = document.createElement('div');
   error.className = 'error-message';
   error.textContent = 'Error loading posts';
-  contentWrapper.appendChild(error);
+  postsGrid.appendChild(error);
 }
-
-function setVhUnit() {
-    const vh = window.innerHeight * 0.01;
-    document.documentElement.style.setProperty('--vh', `${vh}px`);
-  }
-  
-  window.addEventListener('resize', setVhUnit);
-  setVhUnit();
->>>>>>> refs/remotes/origin/main
