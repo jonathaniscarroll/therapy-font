@@ -1,4 +1,3 @@
-
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.0/firebase-app.js';
 import { 
   getFirestore, 
@@ -7,14 +6,21 @@ import {
   query, 
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  doc,
+  updateDoc,
+  deleteDoc
 } from 'https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore.js';
+import { 
+  getAuth,
+  onAuthStateChanged
+} from 'https://www.gstatic.com/firebasejs/9.6.0/firebase-auth.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCPzVfg58M_36pcmXtLFvn0OCgzMiMfZeE",
   authDomain: "therapy-font.firebaseapp.com",
   projectId: "therapy-font",
-  storageBucket: "therapy-font.firebasestorage.app", // Fixed storage bucket
+  storageBucket: "therapy-font.firebasestorage.app",
   messagingSenderId: "620550496974",
   appId: "1:620550496974:web:3ad9033e4fc0c7bf8e669f",
   measurementId: "G-0S5ECBGT7Y"
@@ -22,40 +28,43 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 // DOM Elements
-const contentWrapper = document.querySelector('.content-wrapper');
+const postsGrid = document.getElementById('posts-grid');
+const fullscreenViewer = document.getElementById('fullscreen-viewer');
+const fullscreenContent = document.querySelector('.fullscreen-content');
+const closeFullscreen = document.querySelector('.close-fullscreen');
 let lastVisible = null;
 let loading = false;
 let allPostsLoaded = false;
+let currentUser = null;
 
 // Initialize
 window.addEventListener('DOMContentLoaded', () => {
+  checkAuthState();
   loadInitialPosts();
   setupScrollListener();
 });
 
-// Load first set of posts
-// Add a simple cache mechanism
-const postCache = new Map();
+// Auth state
+function checkAuthState() {
+  onAuthStateChanged(auth, (user) => {
+    currentUser = user;
+  });
+}
 
+// Load first set of posts
 async function loadInitialPosts() {
   try {
     showLoading(true);
     
-    // Check cache first
-    if (postCache.has('initialPosts')) {
-      const cachedPosts = postCache.get('initialPosts');
-      cachedPosts.forEach(post => createFullScreenPost(post));
-      showLoading(false);
-      return;
-    }
-    
     const q = query(
       collection(db, "posts"), 
       orderBy("createdAt", "desc"), 
-      limit(3)
+      limit(9)
     );
+    
     const querySnapshot = await getDocs(q);
     
     if (querySnapshot.empty) {
@@ -63,14 +72,10 @@ async function loadInitialPosts() {
       return;
     }
 
-    const posts = [];
     querySnapshot.forEach(doc => {
-      posts.push(doc.data());
-      createFullScreenPost(doc.data());
+      createGridPost(doc.id, doc.data());
     });
     
-    // Cache the results
-    postCache.set('initialPosts', posts);
     lastVisible = querySnapshot.docs[querySnapshot.docs.length-1];
   } catch (error) {
     console.error("Error loading posts:", error);
@@ -81,178 +86,206 @@ async function loadInitialPosts() {
 }
 
 // Load more posts when scrolling
-// Add retry logic to loadMorePosts
 async function loadMorePosts() {
-    if (loading || allPostsLoaded) return;
-    
-    loading = true;
-    showLoading(true);
-    
-    try {
-      const nextQ = query(
-        collection(db, "posts"),
-        orderBy("createdAt", "desc"),
-        startAfter(lastVisible),
-        limit(2)
-      );
-      
-      const nextSnapshot = await getDocs(nextQ);
-      
-      if (nextSnapshot.empty) {
-        allPostsLoaded = true;
-        return;
-      }
-      
-      lastVisible = nextSnapshot.docs[nextSnapshot.docs.length-1];
-      
-      // Cache these posts
-      const newPosts = [];
-      nextSnapshot.forEach(doc => {
-        newPosts.push(doc.data());
-        createFullScreenPost(doc.data());
-      });
-      
-      postCache.set(`posts-after-${lastVisible.id}`, newPosts);
-    } catch (error) {
-      console.error("Error loading more posts:", error);
-      
-      // Show retry button
-      const retryBtn = document.createElement('button');
-      retryBtn.className = 'retry-button';
-      retryBtn.textContent = 'Retry Loading';
-      retryBtn.addEventListener('click', () => {
-        retryBtn.remove();
-        loadMorePosts();
-      });
-      
-      const sentinel = document.getElementById('load-more-sentinel');
-      if (sentinel) sentinel.before(retryBtn);
-    } finally {
-      loading = false;
-      showLoading(false);
-    }
-  }
-
-// Create full-screen post element
-function createFullScreenPost(post) {
-  const postElement = document.createElement('div');
-  postElement.className = 'full-screen-post';
+  if (loading || allPostsLoaded) return;
   
-  // Media container
+  loading = true;
+  showLoading(true);
+  
+  try {
+    const nextQ = query(
+      collection(db, "posts"),
+      orderBy("createdAt", "desc"),
+      startAfter(lastVisible),
+      limit(6)
+    );
+    
+    const nextSnapshot = await getDocs(nextQ);
+    
+    if (nextSnapshot.empty) {
+      allPostsLoaded = true;
+      return;
+    }
+    
+    nextSnapshot.forEach(doc => {
+      createGridPost(doc.id, doc.data());
+    });
+    
+    lastVisible = nextSnapshot.docs[nextSnapshot.docs.length-1];
+  } catch (error) {
+    console.error("Error loading more posts:", error);
+  } finally {
+    loading = false;
+    showLoading(false);
+  }
+}
+
+// Create grid post element
+function createGridPost(postId, post) {
+  const gridItem = document.createElement('div');
+  gridItem.className = 'grid-item';
+  gridItem.dataset.postId = postId;
+  
   const mediaContainer = document.createElement('div');
   mediaContainer.className = 'media-container';
   
   if (post.media && post.media.length > 0) {
     const media = post.media[0];
-    // In createFullScreenPost function, modify video handling:
-if (media.type === 'video') {
-    const videoWrapper = document.createElement('div');
-    videoWrapper.className = 'video-wrapper';
-    
-    const video = document.createElement('video');
-    video.src = media.url;
-    video.controls = true;
-    video.playsInline = true;
-    video.loop = true;
-    video.muted = true;
-    video.preload = 'metadata'; // Optimize preloading
-    video.loading = 'lazy'; // Lazy load videos
-    
-    // Add loading state
-    video.addEventListener('loadstart', () => {
-      videoWrapper.classList.add('video-loading');
-    });
-    
-    video.addEventListener('loadedmetadata', () => {
-      videoWrapper.classList.remove('video-loading');
-    });
-    
-    // Add click to play/pause with better UX
-    const playOverlay = document.createElement('div');
-    playOverlay.className = 'video-overlay';
-    const playButton = document.createElement('button');
-    playButton.className = 'play-button';
-    playButton.innerHTML = '▶';
-    playOverlay.appendChild(playButton);
-    
-    playOverlay.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (video.paused) {
-        video.play().catch(e => console.log("Play failed:", e));
-        playOverlay.style.display = 'none';
-      }
-    });
-    
-    video.addEventListener('pause', () => {
-      playOverlay.style.display = 'flex';
-    });
-    
-    videoWrapper.appendChild(video);
-    videoWrapper.appendChild(playOverlay);
-    mediaContainer.appendChild(videoWrapper);
-  }
-     else {
-        const img = document.createElement('img');
-        img.src = media.url;
-        img.alt = media.caption || '';
-        img.loading = 'lazy';
-        img.decoding = 'async';
-        
-        // Use a blurred placeholder for better perceived performance
-        img.style.transition = 'filter 0.3s ease';
-        img.style.filter = 'blur(5px)';
-        
-        img.onload = () => {
-          img.style.filter = 'none';
-        };
-        
-        mediaContainer.appendChild(img);
-      
-    }
+    const mediaElement = media.type === 'video' 
+      ? createVideoElement(media.url, false)
+      : createImageElement(media.url, false);
+    mediaContainer.appendChild(mediaElement);
   }
   
-  // Text overlay
-  const textOverlay = document.createElement('div');
-  textOverlay.className = 'text-overlay';
+  const overlay = document.createElement('div');
+  overlay.className = 'grid-overlay';
+  
+  if (post.title) {
+    const title = document.createElement('h3');
+    title.className = 'grid-title';
+    title.textContent = post.title;
+    overlay.appendChild(title);
+  }
+  
+  if (post.content) {
+    const content = document.createElement('p');
+    content.className = 'grid-content';
+    content.textContent = post.content;
+    overlay.appendChild(content);
+  }
+  
+  gridItem.appendChild(mediaContainer);
+  gridItem.appendChild(overlay);
+  
+  gridItem.addEventListener('click', () => {
+    openFullscreenView(postId, post);
+  });
+  
+  postsGrid.appendChild(gridItem);
+}
+
+// Open fullscreen view
+function openFullscreenView(postId, post) {
+  fullscreenContent.innerHTML = '';
+  
+  // Add media
+  if (post.media && post.media.length > 0) {
+    const media = post.media[0];
+    const mediaElement = media.type === 'video' 
+      ? createVideoElement(media.url, true)
+      : createImageElement(media.url, true);
+    fullscreenContent.appendChild(mediaElement);
+  }
+  
+  // Add text
+  const textContainer = document.createElement('div');
+  textContainer.className = 'fullscreen-text';
   
   if (post.title) {
     const title = document.createElement('h1');
-    title.className = 'post-title';
+    title.className = 'fullscreen-title';
     title.textContent = post.title;
-    textOverlay.appendChild(title);
+    textContainer.appendChild(title);
   }
   
   if (post.content) {
     const content = document.createElement('div');
-    content.className = 'post-content';
+    content.className = 'fullscreen-content';
     content.textContent = post.content;
-    textOverlay.appendChild(content);
+    textContainer.appendChild(content);
   }
   
-  postElement.appendChild(mediaContainer);
-  postElement.appendChild(textOverlay);
-  contentWrapper.appendChild(postElement);
+  fullscreenContent.appendChild(textContainer);
+  
+  // Add edit buttons if admin
+  if (currentUser) {
+    const editButtons = document.createElement('div');
+    editButtons.className = 'edit-buttons';
+    
+    const editBtn = document.createElement('button');
+    editBtn.className = 'edit-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => editPost(postId));
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'edit-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deletePost(postId));
+    
+    editButtons.appendChild(editBtn);
+    editButtons.appendChild(deleteBtn);
+    fullscreenContent.appendChild(editButtons);
+  }
+  
+  fullscreenViewer.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+// Close fullscreen view
+closeFullscreen.addEventListener('click', () => {
+  fullscreenViewer.classList.remove('active');
+  document.body.style.overflow = 'auto';
+});
+
+// Create media elements
+function createImageElement(src, isFullscreen) {
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.className = isFullscreen ? 'fullscreen-media' : 'grid-media';
+  return img;
+}
+
+function createVideoElement(src, isFullscreen) {
+  const video = document.createElement('video');
+  video.src = src;
+  video.controls = true;
+  video.playsInline = true;
+  video.className = isFullscreen ? 'fullscreen-media' : 'grid-media';
+  if (!isFullscreen) {
+    video.muted = true;
+    video.loop = true;
+  }
+  return video;
+}
+
+// Post editing functions
+function editPost(postId) {
+  // Implement your edit functionality here
+  alert(`Editing post ${postId}`);
+}
+
+async function deletePost(postId) {
+  if (confirm('Are you sure you want to delete this post?')) {
+    try {
+      await deleteDoc(doc(db, "posts", postId));
+      document.querySelector(`.grid-item[data-post-id="${postId}"]`).remove();
+      fullscreenViewer.classList.remove('active');
+    } catch (error) {
+      console.error("Error deleting post:", error);
+      alert('Failed to delete post');
+    }
+  }
 }
 
 // Scroll listener for infinite loading
 function setupScrollListener() {
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting && !loading && !allPostsLoaded) {
-          loadMorePosts();
-        }
-      });
-    }, {
-      rootMargin: '100px',
-      threshold: 0.1
-    });
-  
-    // Create and observe a sentinel element
-    const sentinel = document.createElement('div');
-    sentinel.id = 'load-more-sentinel';
-    contentWrapper.appendChild(sentinel);
-    observer.observe(sentinel);
-  }
+  const observer = new IntersectionObserver((entries) => {
+    const entry = entries[0];
+    if (entry.isIntersecting && !loading && !allPostsLoaded) {
+      loadMorePosts();
+    }
+  }, {
+    rootMargin: '200px',
+    threshold: 0.1
+  });
+
+  const sentinel = document.createElement('div');
+  sentinel.id = 'load-more-sentinel';
+  postsGrid.appendChild(sentinel);
+  observer.observe(sentinel);
+}
 
 // Helper functions
 function showLoading(show) {
@@ -272,12 +305,8 @@ function showNoPostsMessage() {
   const message = document.createElement('div');
   message.className = 'no-posts';
   message.textContent = 'No posts available';
-  contentWrapper.appendChild(message);
+  postsGrid.appendChild(message);
 }
 
 function showErrorMessage() {
-  const error = document.createElement('div');
-  error.className = 'error-message';
-  error.textContent = 'Error loading posts';
-  contentWrapper.appendChild(error);
-}
+  const error = document.createElement('
